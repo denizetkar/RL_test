@@ -62,11 +62,11 @@ for episode in range(1, NUM_OF_EPISODES+1):
             Q_table[s, a] = Q_table[s, a] + LR*(lt_rewards[i] - Q_table[s, a])
 
 try:
-    Q_old_table = np.loadtxt(GAME_NAME + ".csv", delimiter=';')
+    Q_old_table = np.loadtxt("tabular_models/" + GAME_NAME + ".csv", delimiter=';')
     Q_table = (Q_table + Q_old_table)/2.0
 except IOError:
     pass
-np.savetxt(GAME_NAME + ".csv", Q_table, delimiter=';')
+np.savetxt("tabular_models/" + GAME_NAME + ".csv", Q_table, delimiter=';')
 
 if False:
     s = ENV.reset()

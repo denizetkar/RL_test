@@ -58,7 +58,7 @@ episode_dataset = tf.data.Dataset.from_generator(
     episode_generator,
     output_types=(tf.int32, tf.float64),
     output_shapes=((2,), ())).batch(batch_size=MAX_STEP_PER_EPISODE).prefetch(128)
-q_agent = rl_agents.QLearningAgent(ENV.observation_space.n, ENV.action_space.n, episode_dataset)
+q_agent = rl_agents.QLearningDiscStateDiscActionAgent(ENV.observation_space.n, ENV.action_space.n, episode_dataset)
 
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
@@ -73,11 +73,11 @@ with tf.Session() as sess:
     Q_table = sess.run(q_agent.Q_table)
 
 try:
-    Q_old_table = np.loadtxt(GAME_NAME + ".csv", delimiter=';')
+    Q_old_table = np.loadtxt("tabular_models/" + GAME_NAME + ".csv", delimiter=';')
     Q_table = (Q_table + Q_old_table)/2.0
 except IOError:
     pass
-np.savetxt(GAME_NAME + ".csv", Q_table, delimiter=';')
+np.savetxt("tabular_models/" + GAME_NAME + ".csv", Q_table, delimiter=';')
 
 if False:
     s = ENV.reset()
