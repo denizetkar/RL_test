@@ -20,7 +20,7 @@ breakpoint;
 if False:
     game_name = 'Taxi-v2'
     env = gym.make(game_name)
-    Q_old_table = np.loadtxt(game_name + ".csv", delimiter=';')
+    Q_old_table = np.loadtxt("tabular_models/" + game_name + ".csv", delimiter=';')
     s = env.reset()
     env.render()
     while True:
