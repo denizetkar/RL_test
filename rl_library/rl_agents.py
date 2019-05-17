@@ -50,5 +50,22 @@ class PolicyGradientContStateDiscActionAgentTorch(nn.Module):
         x = self.hidden_layer(state_input)
         x = F.selu(x)
         x = self.action_layer(x)
-        x = F.log_softmax(x, dim=1)
+        x = F.log_softmax(x, dim=-1)
         return x
+
+
+class ActorCriticContStateDiscActionAgentTorch(nn.Module):
+    def __init__(self, s_dim, a_size, hidden_layer_size):
+        super().__init__()
+        self.hidden_layer = nn.Linear(s_dim, hidden_layer_size)
+        self.action_layer = nn.Linear(hidden_layer_size, a_size)
+        self.value_layer = nn.Linear(hidden_layer_size, 1)
+
+    def forward(self, state_input):
+        x = self.hidden_layer(state_input)
+        x = F.leaky_relu(x)
+        action_scores = self.action_layer(x)
+        log_a_probs = F.log_softmax(action_scores, dim=-1)
+        state_values = self.value_layer(x)
+        return log_a_probs, state_values
+
