@@ -1,5 +1,6 @@
 import gym
 import numpy as np
+from rl_library import helper
 # Register my gym environments
 import rl_library
 
@@ -8,16 +9,6 @@ STEP_PER_EPISODE_MAX = 500
 STEP_PER_EPISODE_MIN = 100
 GAMMA = 0.95
 EPSILON = 0.1
-
-
-def discount_rewards(reward):
-    """ take 1D float array of rewards and compute discounted reward """
-    discounted_r = np.zeros_like(reward, dtype=np.float64)
-    running_add = 0.0
-    for t in reversed(range(0, len(reward))):
-        running_add = running_add * GAMMA + reward[t]
-        discounted_r[t] = running_add
-    return discounted_r
 
 # GAME_NAME = 'EasyBlackJack-v0'
 GAME_NAME = 'Taxi-v2'
@@ -43,7 +34,7 @@ for episode in range(1, NUM_OF_EPISODES+1):
             break
         s = s1
 
-    lt_rewards = discount_rewards(list(zip(*episode_hist))[2])
+    lt_rewards = helper.discount_rewards(list(zip(*episode_hist))[2], GAMMA)
     # Delete the last (s, a, r) tuple
     episode_hist.pop()
     lt_rewards = np.delete(lt_rewards, lt_rewards.size - 1)

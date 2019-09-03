@@ -1,22 +1,12 @@
 import gym
 import numpy as np
 import tensorflow as tf
-from rl_library import rl_agents
+from rl_library import rl_agents, helper
 import matplotlib.pyplot as plt
 
 NUM_OF_EPISODES = 1000
 MAX_STEP_PER_EPISODE = 1000
 GAMMA = 1.0
-
-
-def discount_rewards(reward):
-    """ take 1D float array of rewards and compute discounted reward """
-    discounted_r = np.zeros_like(reward, dtype=np.float64)
-    running_add = 0.0
-    for t in reversed(range(0, len(reward))):
-        running_add = running_add * GAMMA + reward[t]
-        discounted_r[t] = running_add
-    return discounted_r
 
 
 GAME_NAME = 'CartPole-v1'
@@ -54,7 +44,7 @@ with tf.Session() as sess:
                 break
             s = s1
 
-        lt_rewards = discount_rewards(list(zip(*episode_hist))[2])
+        lt_rewards = helper.discount_rewards(list(zip(*episode_hist))[2], GAMMA)
         # Delete the last (s, a, r) tuple
         episode_hist.pop()
         lt_rewards = np.delete(lt_rewards, lt_rewards.size - 1)

@@ -1,23 +1,13 @@
 import gym
 import torch
 import numpy as np
-from rl_library import rl_agents
+from rl_library import rl_agents, helper
 import matplotlib.pyplot as plt
 torch.set_default_dtype(torch.float64)
 
 NUM_OF_EPISODES = 1000
 MAX_STEP_PER_EPISODE = 1000
 GAMMA = 1.0
-
-
-def discount_rewards(reward):
-    """ take 1D float array of rewards and compute discounted reward """
-    discounted_r = np.zeros_like(reward, dtype=np.float64)
-    running_add = 0.0
-    for t in reversed(range(0, len(reward))):
-        running_add = running_add * GAMMA + reward[t]
-        discounted_r[t] = running_add
-    return discounted_r
 
 
 GAME_NAME = 'CartPole-v1'
@@ -37,34 +27,34 @@ for episode in range(1, NUM_OF_EPISODES+1):
     LR, episodic_reward, s, episode_hist = 0.01 * episode**(-0.3), 0.0, ENV.reset(), []
     # ENV.render()
     while True:
-        log_a_probs = q_agent(torch.from_numpy(s))
-        a = np.random.choice(ENV.action_space.n, p=log_a_probs.exp().data.numpy())
+        log_a_prob = q_agent(torch.from_numpy(s))
+        a = np.random.choice(ENV.action_space.n, p=log_a_prob.exp().data.numpy())
         s1, r, d, _ = ENV.step(a)
         # ENV.render()
         episodic_reward += r
-        episode_hist.append((s, a, r))
+        episode_hist.append((s, a, r, log_a_prob))
         if d is True:
             episode_hist.append((None, None, 0))
             break
         s = s1
 
-    lt_rewards = discount_rewards(list(zip(*episode_hist))[2])
+    lt_rewards = helper.discount_rewards(list(zip(*episode_hist))[2], GAMMA)
     # Delete the last (s, a, r) tuple
     episode_hist.pop()
     lt_rewards = np.delete(lt_rewards, lt_rewards.size - 1)
     # Only use the first visit of each (s, a) tuple
     visited_state_actions = set()
-    visited_states, visited_actions, visited_lt_rewards = [], [], []
-    for i, (s, a, _) in enumerate(episode_hist):
+    visited_actions, visited_lt_rewards, visited_log_a_probs = [], [], []
+    for i, (s, a, _, log_a_prob) in enumerate(episode_hist):
         if (tuple(s), a) not in visited_state_actions:
             visited_state_actions.add((tuple(s), a))
-            visited_states.append(s)
             visited_actions.append(a)
             visited_lt_rewards.append(lt_rewards[i])
+            visited_log_a_probs.append(log_a_prob)
 
-    log_action_probs = q_agent.forward(torch.tensor(visited_states))
+    visited_log_a_probs_torch = torch.stack(visited_log_a_probs)
     ids = torch.tensor(visited_actions).long()
-    log_policy_outputs = log_action_probs.gather(1, ids.view(-1, 1))
+    log_policy_outputs = visited_log_a_probs_torch.gather(1, ids.view(-1, 1))
     loss = -(log_policy_outputs.squeeze(1) * torch.tensor(visited_lt_rewards)).mean()
 
     q_agent.zero_grad()

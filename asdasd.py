@@ -4,7 +4,8 @@ import gym
 from rl_library import rl_envs, plotting
 import torch
 
-if True:
+if False:
+    breakpoint;
     x = torch.tensor(0.0, requires_grad=True)
     a = torch.tensor(1.0)
     b = torch.tensor(-2.0)
@@ -16,8 +17,8 @@ if True:
         x.data.sub_(x.grad.data * LR)
         x.grad.data *= 0.0
 
-breakpoint;
 if False:
+    breakpoint;
     game_name = 'Taxi-v2'
     env = gym.make(game_name)
     Q_old_table = np.loadtxt("tabular_models/" + game_name + ".csv", delimiter=';')
@@ -31,8 +32,8 @@ if False:
             break
         s = s1
 
-breakpoint;
 if False:
+    breakpoint;
     game_name = 'EasyBlackJack-v0'
     Q_old_table = np.loadtxt(game_name + ".csv", delimiter=';')
     V = {}
@@ -41,4 +42,13 @@ if False:
         if 11 <= sum_hand <= 21 and 1 <= dealer <= 11:
             V[(sum_hand, dealer, usable_ace)] = np.max(Q_old_table[i, :])
     plotting.plot_value_function(V, "Optimal Value Function")
-breakpoint;
+
+if True:
+    breakpoint;
+    x = torch.zeros(1, requires_grad=True)
+    x.data.fill_(2.0)
+    y = x ** 2
+    z = x ** 3
+    a = y.detach() - z
+    a.backward(retain_graph=True)
+    print(x.grad)
