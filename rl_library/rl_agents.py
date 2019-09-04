@@ -69,3 +69,19 @@ class ActorCriticContStateDiscActionAgentTorch(nn.Module):
         state_values = self.value_layer(x)
         return log_a_probs, state_values
 
+
+class PPOContStateDiscActionAgentTorch(nn.Module):
+    def __init__(self, s_dim, a_size, hidden_layer_size):
+        super().__init__()
+        self.hidden_layer = nn.Linear(s_dim, hidden_layer_size)
+        self.hidden_layer2 = nn.Linear(hidden_layer_size, hidden_layer_size)
+        self.action_layer = nn.Linear(hidden_layer_size, a_size)
+        self.value_layer = nn.Linear(hidden_layer_size, 1)
+
+    def forward(self, states):
+        x = F.leaky_relu(self.hidden_layer(states))
+        x = F.leaky_relu(self.hidden_layer2(x))
+        action_scores = self.action_layer(x)
+        log_a_probs = F.log_softmax(action_scores, dim=-1)
+        state_values = self.value_layer(x)
+        return log_a_probs, state_values

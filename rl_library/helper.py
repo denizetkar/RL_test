@@ -6,23 +6,27 @@ import numpy as np
 class ReplayMemory(object):
 
     def __init__(self, capacity, field_names=('state', 'action', 'reward', 'next_state')):
-        self.Transition = namedtuple('Transition', field_names)
-        self.capacity = capacity
+        self._Transition = namedtuple('Transition', field_names)
+        self._capacity = capacity
         self.memory = []
-        self.position = 0
+        self._position = 0
 
     def push(self, *args):
         """Saves a transition."""
-        if len(self.memory) < self.capacity:
+        if len(self.memory) < self._capacity:
             self.memory.append(None)
-        self.memory[self.position] = self.Transition(*args)
-        self.position = (self.position + 1) % self.capacity
+        self.memory[self._position] = self._Transition(*args)
+        self._position = (self._position + 1) % self._capacity
 
     def sample(self, batch_size):
         return random.sample(self.memory, batch_size)
 
     def __len__(self):
         return len(self.memory)
+
+    def clear(self):
+        self.memory.clear()
+        self._position = 0
 
 
 def discount_rewards(reward, gamma):
