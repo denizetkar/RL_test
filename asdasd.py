@@ -43,7 +43,7 @@ if False:
             V[(sum_hand, dealer, usable_ace)] = np.max(Q_old_table[i, :])
     plotting.plot_value_function(V, "Optimal Value Function")
 
-if True:
+if False:
     breakpoint;
     x = torch.zeros(1, requires_grad=True)
     x.data.fill_(2.0)
@@ -52,3 +52,17 @@ if True:
     a = y.detach() - z
     a.backward(retain_graph=True)
     print(x.grad)
+
+if True:
+    breakpoint;
+    solution = np.array([0.5, 0.1, -0.3])
+    def f(w): return -np.sum((w - solution)**2, axis=-1)
+    npop = 50
+    sigma = 0.1
+    alpha = 0.001
+    w = np.random.randn(3)
+    for i in range(300):
+        N = np.random.randn(npop, 3)
+        R = f(w + sigma * N)
+        A = (R - np.mean(R))/(np.std(R) + 1e-8)
+        w = w + alpha/(npop * sigma) * np.dot(N.T, A)
