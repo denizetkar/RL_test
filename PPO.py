@@ -10,16 +10,19 @@ torch.set_default_dtype(torch.float64)
 
 def main():
     # MODEL CHANGES
-    # TODO: Use 2 separate critics, 1 actor
-    # TODO: Use bagging ensemble for value function estimation
+    # TODO: Use 2 separate critics, 1 actor                     (3)
+    # TODO: Use bagging ensemble for value function estimation  (3)
     # LOSS FUNCTION CHANGES
-    # TODO: Use clipped value loss
-    # TODO: Add intrinsic reward, forward/inverse dynamic loss
+    # TODO: Use clipped value loss                              (2)
+    # TODO: Add intrinsic reward, forward/inverse dynamic loss  (5)
     # TRAINING CHANGES
-    # TODO: Use TD(lambda) as value function target
-    # TODO: Train each critic (value loss) and forward/inverse loss for 1 batch
-    #  before training actor (policy loss + entropy loss) for 1 batch
-    # TODO: Experiment with co-training actor and other losses for better sampling efficiency
+    # TODO: Use TD(lambda) as value function target             (1)
+    # TODO: Train each critic (value loss) for 1 batch before   (4)
+    #  training actor (policy loss + entropy loss) for 1 batch
+    # TODO: Train forward/inverse loss with critics before      (5)
+    #  training actor (policy loss + entropy loss) for 1 batch
+    # TODO: Experiment with co-training actor and other losses  (6)
+    #  for better sampling efficiency
     ############## Hyperparameters ##############
     env_name = 'CartPole-v1'
     # creating environment
