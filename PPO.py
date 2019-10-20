@@ -1,10 +1,13 @@
+import time
+
 import gym
-import torch
-import numpy as np
-import torch.nn.functional as F
 import matplotlib.pyplot as plt
-from rl_library import rl_agents, helper
+import numpy as np
+import torch
 from torch.distributions import Categorical
+import torch.nn.functional as F
+
+from rl_library import rl_agents, helper
 torch.set_default_dtype(torch.float64)
 
 
@@ -16,7 +19,6 @@ def main():
     # TODO: Use clipped value loss                              (2)
     # TODO: Add intrinsic reward, forward/inverse dynamic loss  (5)
     # TRAINING CHANGES
-    # TODO: Use TD(lambda) as value function target             (1)
     # TODO: Train each critic (value loss) for 1 batch before   (4)
     #  training actor (policy loss + entropy loss) for 1 batch
     # TODO: Train forward/inverse loss with critics before      (5)
@@ -34,9 +36,10 @@ def main():
     episode_timesteps = 300     # max timesteps in one episode
     n_latent_var = 64           # number of variables in hidden layer
     batch_timestep = 2000       # update policy every n timesteps
-    lr = 2e-3
+    lr = 1e-3
     betas = (0.9, 0.999)
     gamma = 0.99                # discount factor
+    gae_lambda = 0.9375         # lambda value for td(lambda) returns
     k_epochs = 4                # update policy for K epochs
     eps_clip = 0.2              # clip parameter for PPO
     random_seed = None
@@ -79,39 +82,40 @@ def main():
             if render:
                 env.render()
             episodic_reward += reward
-            episode_hist.append((state, action, reward, dist.log_prob(action), state_value.squeeze(0)))
+            episode_hist.append((torch.tensor(state), action, torch.tensor(reward),
+                                 dist.log_prob(action).detach(), state_value.squeeze(0).detach()))
             episode_step, batch_step, total_step = episode_step + 1, batch_step + 1, total_step + 1
             if done:
                 if episode_step >= episode_timesteps:
                     _, state_value = rl_agent_old(torch.as_tensor(next_state))
-                    episode_hist.append((None, None, state_value.item(), None, None))
+                    episode_hist.append((None, None, torch.tensor(np.nan), None, state_value.squeeze(0).detach()))
                 else:
-                    episode_hist.append((None, None, 0, None, None))
+                    episode_hist.append((None, None, torch.tensor(np.nan), None, torch.tensor(0.0)))
                 break
             state = next_state
         episode_reward_list.append(episodic_reward)
 
-        lt_rewards = helper.discount_rewards(list(zip(*episode_hist))[2], gamma)
+        lt_rewards = helper.td_lambda_returns(
+            torch.stack(helper.zip_ith_index(episode_hist, 2)),
+            torch.stack(helper.zip_ith_index(episode_hist, 4)), gamma, gae_lambda)
         # Delete the last (s, a, r, log_prob, v) tuple
         episode_hist.pop()
-        lt_rewards = np.delete(lt_rewards, lt_rewards.size - 1)
         # Normalizing the long term rewards
-        lt_rewards = torch.as_tensor(lt_rewards)
-        lt_rewards = (lt_rewards - lt_rewards.mean()) / (lt_rewards.std() + 1e-5)
+        lt_rewards = (lt_rewards - lt_rewards.mean()) / (lt_rewards.std() + 1e-7)
         # DO NOT only use the first visit of each (s, a) tuple
         for i, (state, action, _, log_prob, state_value) in enumerate(episode_hist):
-            transition_memory.push(state, action, lt_rewards[i], log_prob.detach(), state_value.detach())
+            transition_memory.push(state, action, lt_rewards[i], log_prob, state_value)
 
         if batch_step >= batch_timestep:
             batch_step = 0
             old_states, old_actions, old_lt_rewards, old_log_probs, old_state_values = zip(*transition_memory.memory)
             transition_memory.clear()
             # convert lists to tensors
-            old_states = torch.as_tensor(old_states)
+            old_states = torch.stack(old_states)
             old_actions = torch.as_tensor(old_actions)
             old_lt_rewards = torch.as_tensor(old_lt_rewards)
-            old_log_probs = torch.stack(old_log_probs)
-            old_state_values = torch.stack(old_state_values)
+            old_log_probs = torch.as_tensor(old_log_probs)
+            old_state_values = torch.as_tensor(old_state_values)
             old_advantages = old_lt_rewards - old_state_values
 
             # Optimize policy for K epochs:
@@ -150,4 +154,6 @@ def main():
 
 
 if __name__ == '__main__':
+    start = time.time()
     main()
+    print('Total time (sec): %f' % (time.time() - start, ))

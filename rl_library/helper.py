@@ -1,6 +1,8 @@
 import random
 from collections import namedtuple
+
 import numpy as np
+import torch
 
 
 class ReplayMemory(object):
@@ -44,3 +46,17 @@ def advantage_function(reward, state_value, gamma):
     for t in range(0, len(advantage_f)):
         advantage_f[t] = reward[t] + gamma * state_value[t+1].item() - state_value[t].item()
     return advantage_f
+
+
+def zip_ith_index(iterable, i):
+    return list(map(lambda x: x[i], iterable))
+
+
+def td_lambda_returns(rewards, state_values, gamma, gae_lambda):
+    gae = 0
+    delta = rewards[:-1] + gamma * state_values[1:] - state_values[:-1]
+    td_lambda_targets = torch.zeros(rewards.size(0) - 1)
+    for t in reversed(range(rewards.size(0) - 1)):
+        gae = delta[t] + gamma * gae_lambda * gae
+        td_lambda_targets[t] = gae + state_values[t]
+    return td_lambda_targets
