@@ -9,8 +9,17 @@ torch.set_default_dtype(torch.float64)
 
 
 def main():
+    # MODEL CHANGES
+    # TODO: Use 2 separate critics, 1 actor
     # TODO: Use bagging ensemble for value function estimation
-    # TODO: Update the 'critic's 2 times before updating the 'actor'
+    # LOSS FUNCTION CHANGES
+    # TODO: Use clipped value loss
+    # TODO: Add intrinsic reward, forward/inverse dynamic loss
+    # TRAINING CHANGES
+    # TODO: Use TD(lambda) as value function target
+    # TODO: Train each critic (value loss) and forward/inverse loss for 1 batch
+    #  before training actor (policy loss + entropy loss) for 1 batch
+    # TODO: Experiment with co-training actor and other losses for better sampling efficiency
     ############## Hyperparameters ##############
     env_name = 'CartPole-v1'
     # creating environment
@@ -18,10 +27,10 @@ def main():
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
     render = False
-    max_episodes = 2000         # max training episodes
-    max_timesteps = 300         # max timesteps in one episode
+    max_batches = 100           # max training batches (each with at least 'batch_timestep' steps)
+    episode_timesteps = 300     # max timesteps in one episode
     n_latent_var = 64           # number of variables in hidden layer
-    update_timestep = 2000      # update policy every n timesteps
+    batch_timestep = 2000       # update policy every n timesteps
     lr = 2e-3
     betas = (0.9, 0.999)
     gamma = 0.99                # discount factor
@@ -34,7 +43,7 @@ def main():
         torch.manual_seed(random_seed)
         env.seed(random_seed)
 
-    env._max_episode_steps = max_timesteps
+    env._max_episode_steps = episode_timesteps
     rl_agent = rl_agents.PPOContStateDiscActionAgentTorch(
         state_dim, action_dim, n_latent_var)
     rl_agent_old = rl_agents.PPOContStateDiscActionAgentTorch(
@@ -48,14 +57,17 @@ def main():
                                  lr=lr, betas=betas)
 
     episode_reward_list = []
-    transition_memory = helper.ReplayMemory(update_timestep + max_timesteps,
+    transition_memory = helper.ReplayMemory(batch_timestep + episode_timesteps,
                                             ('state', 'action', 'lt_reward', 'log_prob', 'state_value'))
-    total_step = 0
-    for episode in range(1, max_episodes + 1):
+    batch_step = total_step = 0
+    max_total_step = max_batches * batch_timestep
+    # Start training loop
+    while True:
         episodic_reward, state, episode_hist = 0.0, env.reset(), []
         if render:
             env.render()
         episode_step = 0
+        # Start episode loop
         while True:
             log_prob, state_value = rl_agent_old(torch.as_tensor(state))
             dist = Categorical(logits=log_prob)
@@ -65,10 +77,9 @@ def main():
                 env.render()
             episodic_reward += reward
             episode_hist.append((state, action, reward, dist.log_prob(action), state_value.squeeze(0)))
-            episode_step += 1
-            total_step += 1
+            episode_step, batch_step, total_step = episode_step + 1, batch_step + 1, total_step + 1
             if done:
-                if episode_step >= max_timesteps:
+                if episode_step >= episode_timesteps:
                     _, state_value = rl_agent_old(torch.as_tensor(next_state))
                     episode_hist.append((None, None, state_value.item(), None, None))
                 else:
@@ -88,8 +99,8 @@ def main():
         for i, (state, action, _, log_prob, state_value) in enumerate(episode_hist):
             transition_memory.push(state, action, lt_rewards[i], log_prob.detach(), state_value.detach())
 
-        if total_step >= update_timestep or episode == max_episodes:
-            total_step = 0
+        if batch_step >= batch_timestep:
+            batch_step = 0
             old_states, old_actions, old_lt_rewards, old_log_probs, old_state_values = zip(*transition_memory.memory)
             transition_memory.clear()
             # convert lists to tensors
@@ -124,6 +135,9 @@ def main():
 
             # Copy new weights into old policy:
             rl_agent_old.load_state_dict(rl_agent.state_dict())
+
+            if total_step >= max_total_step:
+                break
 
     torch.save(rl_agent.state_dict(), "torch_models/" + env_name + ".ppo_model")
     plt.plot(list(range(1, len(episode_reward_list) + 1)), episode_reward_list)
