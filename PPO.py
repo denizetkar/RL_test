@@ -43,6 +43,8 @@ def main():
     k_epochs = 4                # update policy for K epochs
     eps_clip = 0.2              # clip parameter for PPO
     random_seed = None
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     #############################################
 
     if random_seed is not None:
@@ -51,9 +53,9 @@ def main():
 
     env._max_episode_steps = episode_timesteps
     rl_agent = rl_agents.PPOContStateDiscActionAgentTorch(
-        state_dim, action_dim, n_latent_var)
+        state_dim, action_dim, n_latent_var).to(device)
     rl_agent_old = rl_agents.PPOContStateDiscActionAgentTorch(
-        state_dim, action_dim, n_latent_var)
+        state_dim, action_dim, n_latent_var).to(device)
     try:
         rl_agent.load_state_dict(torch.load("torch_models/" + env_name + ".ppo_model"))
     except FileNotFoundError:
@@ -69,28 +71,32 @@ def main():
     max_total_step = max_batches * batch_timestep
     # Start training loop
     while True:
-        episodic_reward, state, episode_hist = 0.0, env.reset(), []
+        episodic_reward, state, episode_hist = 0.0, torch.as_tensor(env.reset(), device=device), []
         if render:
             env.render()
         episode_step = 0
         # Start episode loop
         while True:
-            log_prob, state_value = rl_agent_old(torch.as_tensor(state))
+            log_prob, state_value = rl_agent_old(state)
+            log_prob, state_value = log_prob.detach(), state_value.detach()
             dist = Categorical(logits=log_prob)
             action = dist.sample()
             next_state, reward, done, _ = env.step(action.item())
+            next_state = torch.as_tensor(next_state, device=device)
             if render:
                 env.render()
             episodic_reward += reward
-            episode_hist.append((torch.tensor(state), action, torch.tensor(reward),
+            episode_hist.append((state, action, torch.tensor(reward, device=device),
                                  dist.log_prob(action).detach(), state_value.squeeze(0).detach()))
             episode_step, batch_step, total_step = episode_step + 1, batch_step + 1, total_step + 1
             if done:
                 if episode_step >= episode_timesteps:
-                    _, state_value = rl_agent_old(torch.as_tensor(next_state))
-                    episode_hist.append((None, None, torch.tensor(np.nan), None, state_value.squeeze(0).detach()))
+                    _, state_value = rl_agent_old(next_state)
+                    episode_hist.append(
+                        (None, None, torch.tensor(np.nan, device=device), None, state_value.squeeze(0).detach()))
                 else:
-                    episode_hist.append((None, None, torch.tensor(np.nan), None, torch.tensor(0.0)))
+                    episode_hist.append(
+                        (None, None, torch.tensor(np.nan, device=device), None, torch.tensor(0.0, device=device)))
                 break
             state = next_state
         episode_reward_list.append(episodic_reward)
@@ -112,10 +118,10 @@ def main():
             transition_memory.clear()
             # convert lists to tensors
             old_states = torch.stack(old_states)
-            old_actions = torch.as_tensor(old_actions)
-            old_lt_rewards = torch.as_tensor(old_lt_rewards)
-            old_log_probs = torch.as_tensor(old_log_probs)
-            old_state_values = torch.as_tensor(old_state_values)
+            old_actions = torch.as_tensor(old_actions, device=device)
+            old_lt_rewards = torch.as_tensor(old_lt_rewards, device=device)
+            old_log_probs = torch.as_tensor(old_log_probs, device=device)
+            old_state_values = torch.as_tensor(old_state_values, device=device)
             old_advantages = old_lt_rewards - old_state_values
 
             # Optimize policy for K epochs:

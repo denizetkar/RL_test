@@ -53,9 +53,9 @@ def zip_ith_index(iterable, i):
 
 
 def td_lambda_returns(rewards, state_values, gamma, gae_lambda):
-    gae = 0
+    gae = torch.tensor(0.0, device=rewards.device)
     delta = rewards[:-1] + gamma * state_values[1:] - state_values[:-1]
-    td_lambda_targets = torch.zeros(rewards.size(0) - 1)
+    td_lambda_targets = torch.zeros(rewards.size(0) - 1, device=rewards.device)
     for t in reversed(range(rewards.size(0) - 1)):
         gae = delta[t] + gamma * gae_lambda * gae
         td_lambda_targets[t] = gae + state_values[t]
