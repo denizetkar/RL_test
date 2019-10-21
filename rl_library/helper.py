@@ -48,7 +48,7 @@ def advantage_function(reward, state_value, gamma):
     return advantage_f
 
 
-def zip_ith_index(iterable, i):
+def get_ith_index(iterable, i):
     return list(map(lambda x: x[i], iterable))
 
 

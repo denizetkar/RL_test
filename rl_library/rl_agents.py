@@ -2,6 +2,8 @@ import tensorflow as tf
 import torch.nn as nn
 import torch.nn.functional as F
 
+from rl_library import helper
+
 
 class QLearningDiscStateDiscActionAgent:
     def __init__(self, s_size, a_size, io_dataset):
@@ -71,16 +73,25 @@ class ActorCriticContStateDiscActionAgentTorch(nn.Module):
 
 
 class PPOContStateDiscActionAgentTorch(nn.Module):
-    def __init__(self, s_dim, a_size, hidden_layer_size):
+    def __init__(self, s_dim, a_size, hidden_layers):
         super().__init__()
-        self.hidden_layer = nn.Linear(s_dim, hidden_layer_size)
-        self.hidden_layer2 = nn.Linear(hidden_layer_size, hidden_layer_size)
-        self.action_layer = nn.Linear(hidden_layer_size, a_size)
-        self.value_layer = nn.Linear(hidden_layer_size, 1)
+        hidden_layer_sizes = helper.get_ith_index(hidden_layers, 0)
+        dropout_rates = helper.get_ith_index(hidden_layers, 1)
+        first_hidden_layer = nn.Linear(s_dim, hidden_layer_sizes[0])
+        self.hidden_layers = nn.ModuleList(
+            [first_hidden_layer] + [nn.Linear(hidden_layer_sizes[i], hidden_layer_sizes[i + 1])
+                                    for i in range(len(hidden_layers) - 1)])
+        # self.bn_layers = nn.ModuleList([nn.BatchNorm1d(hidden_layer_size) for hidden_layer_size in hidden_layer_sizes])
+        self.dropouts = nn.ModuleList([nn.Dropout(dropout) for dropout in dropout_rates])
+        # define final layers (action/value)
+        self.action_layer = nn.Linear(hidden_layer_sizes[-1], a_size)
+        self.value_layer = nn.Linear(hidden_layer_sizes[-1], 1)
 
     def forward(self, states):
-        x = F.leaky_relu(self.hidden_layer(states))
-        x = F.leaky_relu(self.hidden_layer2(x))
+        x = states
+        for hidden_layer, dropout in zip(self.hidden_layers, self.dropouts):
+            x = F.leaky_relu(hidden_layer(x))
+            x = dropout(x)
         action_scores = self.action_layer(x)
         log_a_probs = F.log_softmax(action_scores, dim=-1)
         state_values = self.value_layer(x)

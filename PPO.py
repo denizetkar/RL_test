@@ -1,3 +1,4 @@
+import random
 import time
 
 import gym
@@ -16,7 +17,6 @@ def main():
     # TODO: Use 2 separate critics, 1 actor                     (3)
     # TODO: Use bagging ensemble for value function estimation  (3)
     # LOSS FUNCTION CHANGES
-    # TODO: Use clipped value loss                              (2)
     # TODO: Add intrinsic reward, forward/inverse dynamic loss  (5)
     # TRAINING CHANGES
     # TODO: Train each critic (value loss) for 1 batch before   (4)
@@ -33,13 +33,12 @@ def main():
     action_dim = env.action_space.n
     render = False
     max_batches = 100           # max training batches (each with at least 'batch_timestep' steps)
-    episode_timesteps = 300     # max timesteps in one episode
-    n_latent_var = 64           # number of variables in hidden layer
+    episode_timesteps = 600     # max timesteps in one episode
+    hidden_layers = [(64, 0.0), (64, 0.0)]  # list of (hidden_layer_size, dropout_rate)
     batch_timestep = 2000       # update policy every n timesteps
-    lr = 1e-3
-    betas = (0.9, 0.999)
+    lr = 2e-3
     gamma = 0.99                # discount factor
-    gae_lambda = 0.9375         # lambda value for td(lambda) returns
+    gae_lambda = 0.95           # lambda value for td(lambda) returns
     k_epochs = 4                # update policy for K epochs
     eps_clip = 0.2              # clip parameter for PPO
     random_seed = None
@@ -48,21 +47,23 @@ def main():
     #############################################
 
     if random_seed is not None:
+        random.seed(random_seed)
+        np.random.seed(random_seed)
         torch.manual_seed(random_seed)
         env.seed(random_seed)
 
     env._max_episode_steps = episode_timesteps
     rl_agent = rl_agents.PPOContStateDiscActionAgentTorch(
-        state_dim, action_dim, n_latent_var).to(device)
+        state_dim, action_dim, hidden_layers).to(device)
     rl_agent_old = rl_agents.PPOContStateDiscActionAgentTorch(
-        state_dim, action_dim, n_latent_var).to(device)
+        state_dim, action_dim, hidden_layers).to(device)
     try:
         rl_agent.load_state_dict(torch.load("torch_models/" + env_name + ".ppo_model"))
     except FileNotFoundError:
         pass
     rl_agent_old.load_state_dict(rl_agent.state_dict())
-    optimizer = torch.optim.Adam(rl_agent.parameters(),
-                                 lr=lr, betas=betas)
+    rl_agent_old.eval()
+    optimizer = torch.optim.Adam(rl_agent.parameters(), lr=lr)
 
     episode_reward_list = []
     transition_memory = helper.ReplayMemory(batch_timestep + episode_timesteps,
@@ -77,8 +78,8 @@ def main():
         episode_step = 0
         # Start episode loop
         while True:
-            log_prob, state_value = rl_agent_old(state)
-            log_prob, state_value = log_prob.detach(), state_value.detach()
+            log_prob, state_value = rl_agent_old(state.unsqueeze(0))
+            log_prob, state_value = log_prob.detach().squeeze(0), state_value.detach().squeeze(0)
             dist = Categorical(logits=log_prob)
             action = dist.sample()
             next_state, reward, done, _ = env.step(action.item())
@@ -91,9 +92,10 @@ def main():
             episode_step, batch_step, total_step = episode_step + 1, batch_step + 1, total_step + 1
             if done:
                 if episode_step >= episode_timesteps:
-                    _, state_value = rl_agent_old(next_state)
+                    _, state_value = rl_agent_old(next_state.unsqueeze(0))
+                    state_value = state_value.detach().squeeze(0)
                     episode_hist.append(
-                        (None, None, torch.tensor(np.nan, device=device), None, state_value.squeeze(0).detach()))
+                        (None, None, torch.tensor(np.nan, device=device), None, state_value.squeeze(0)))
                 else:
                     episode_hist.append(
                         (None, None, torch.tensor(np.nan, device=device), None, torch.tensor(0.0, device=device)))
@@ -102,8 +104,8 @@ def main():
         episode_reward_list.append(episodic_reward)
 
         lt_rewards = helper.td_lambda_returns(
-            torch.stack(helper.zip_ith_index(episode_hist, 2)),
-            torch.stack(helper.zip_ith_index(episode_hist, 4)), gamma, gae_lambda)
+            torch.stack(helper.get_ith_index(episode_hist, 2)),
+            torch.stack(helper.get_ith_index(episode_hist, 4)), gamma, gae_lambda)
         # Delete the last (s, a, r, log_prob, v) tuple
         episode_hist.pop()
         # Normalizing the long term rewards
