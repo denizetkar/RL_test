@@ -138,8 +138,15 @@ def main():
                 # Finding Surrogate Loss:
                 surr1 = ratios * old_advantages
                 surr2 = torch.clamp(ratios, 1 - eps_clip, 1 + eps_clip) * old_advantages
-                loss = -torch.min(surr1, surr2) \
-                    + 0.5 * F.smooth_l1_loss(state_values, old_lt_rewards) - 0.01 * dist_entropy
+                policy_loss = -torch.min(surr1, surr2)
+                entropy_loss = -dist_entropy
+                # Finding value loss:
+                state_value_clipped = state_values + torch.clamp(state_values - old_state_values, -eps_clip, eps_clip)
+                v_loss1 = F.smooth_l1_loss(state_values, old_lt_rewards)
+                v_loss2 = F.smooth_l1_loss(state_value_clipped, old_lt_rewards)
+                value_loss = torch.max(v_loss1, v_loss2)
+                # Total loss:
+                loss = policy_loss + 0.5 * value_loss + 0.01 * entropy_loss
 
                 # take gradient step
                 optimizer.zero_grad()
