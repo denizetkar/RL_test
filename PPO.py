@@ -32,14 +32,15 @@ def main():
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
     render = False
-    max_batches = 100           # max training batches (each with at least 'batch_timestep' steps)
-    episode_timesteps = 600     # max timesteps in one episode
+    max_total_step = 200000     # min number of steps to take during training
+    episode_timesteps = 2000    # max time steps in one episode
     hidden_layers = [(64, 0.0), (64, 0.0)]  # list of (hidden_layer_size, dropout_rate)
-    batch_timestep = 2000       # update policy every n timesteps
-    lr = 1e-3
+    buffer_timestep = 6000      # min time steps in a training buffer
+    batch_timestep = 1000       # time steps in a single update batch
+    lr = 5e-4
     gamma = 0.99                # discount factor
-    gae_lambda = 0.95           # lambda value for td(lambda) returns
-    k_epochs = 4                # update policy for K epochs
+    gae_lambda = 0.9            # lambda value for td(lambda) returns
+    k_epochs = 5                # update policy for K epochs
     eps_clip = 0.2              # clip parameter for PPO
     random_seed = None
     # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -66,10 +67,9 @@ def main():
     optimizer = torch.optim.Adam(rl_agent.parameters(), lr=lr)
 
     episode_reward_list = []
-    transition_memory = helper.ReplayMemory(batch_timestep + episode_timesteps,
+    transition_memory = helper.ReplayMemory(buffer_timestep + episode_timesteps,
                                             ('state', 'action', 'lt_reward', 'log_prob', 'state_value'))
-    batch_step = total_step = 0
-    max_total_step = max_batches * batch_timestep
+    buffer_step = total_step = 0
     # Start training loop
     while True:
         episodic_reward, state, episode_hist = 0.0, torch.as_tensor(env.reset(), device=device), []
@@ -89,7 +89,7 @@ def main():
             episodic_reward += reward
             episode_hist.append((state, action, torch.tensor(reward, device=device),
                                  dist.log_prob(action).detach(), state_value.squeeze(0).detach()))
-            episode_step, batch_step, total_step = episode_step + 1, batch_step + 1, total_step + 1
+            episode_step, buffer_step, total_step = episode_step + 1, buffer_step + 1, total_step + 1
             if done:
                 if episode_step >= episode_timesteps:
                     _, state_value = rl_agent_old(next_state.unsqueeze(0))
@@ -109,14 +109,15 @@ def main():
         # Delete the last (s, a, r, log_prob, v) tuple
         episode_hist.pop()
         # Normalizing the long term rewards
-        # lt_rewards = (lt_rewards - lt_rewards.mean()) / (lt_rewards.std() + 1e-8)
+        lt_rewards = (lt_rewards - lt_rewards.mean()) / (lt_rewards.std() + 1e-8)
         # DO NOT only use the first visit of each (s, a) tuple
         for i, (state, action, _, log_prob, state_value) in enumerate(episode_hist):
             transition_memory.push(state, action, lt_rewards[i], log_prob, state_value)
 
-        if batch_step >= batch_timestep:
-            batch_step = 0
+        if buffer_step >= buffer_timestep:
+            buffer_step = 0
             old_states, old_actions, old_lt_rewards, old_log_probs, old_state_values = zip(*transition_memory.memory)
+            buffer_size = len(transition_memory)
             transition_memory.clear()
             # convert lists to tensors
             old_states = torch.stack(old_states)
@@ -125,37 +126,44 @@ def main():
             old_log_probs = torch.as_tensor(old_log_probs, device=device)
             old_state_values = torch.as_tensor(old_state_values, device=device)
             old_advantages = old_lt_rewards - old_state_values
-            # normalize 'old_advantages'
+            # normalize 'old_advantages' for this batch
             old_advantages = (old_advantages - old_advantages.mean()) / (old_advantages.std() + 1e-8)
 
             # Optimize policy for K epochs:
             for _ in range(k_epochs):
-                # Evaluating old actions and values :
-                log_probs, state_values = rl_agent(old_states)
-                log_action_probs = log_probs.gather(1, old_actions.view(-1, 1)).squeeze(1)
-                state_values = state_values.squeeze(1)
-                dist_entropy = Categorical(log_probs).entropy()
+                shuffled_indexes = torch.randperm(buffer_size, device=device)
+                # Perform update for each batch with 'batch_timestep' steps
+                for batch_start_index in range(0, buffer_size, batch_timestep):
+                    batch_end_index = min(batch_start_index + batch_timestep, buffer_size)
+                    batch_indexes = shuffled_indexes[batch_start_index:batch_end_index]
 
-                # Finding the ratio (pi_theta / pi_theta__old):
-                ratios = torch.exp(log_action_probs - old_log_probs)
+                    # Evaluating old actions and values :
+                    log_probs, state_values = rl_agent(old_states[batch_indexes])
+                    log_action_probs = log_probs.gather(1, old_actions[batch_indexes].view(-1, 1)).squeeze(1)
+                    state_values = state_values.squeeze(1)
+                    dist_entropy = Categorical(log_probs).entropy()
 
-                # Finding Surrogate Loss:
-                surr1 = ratios * old_advantages
-                surr2 = torch.clamp(ratios, 1 - eps_clip, 1 + eps_clip) * old_advantages
-                policy_loss = -torch.min(surr1, surr2)
-                entropy_loss = -dist_entropy
-                # Finding value loss:
-                state_value_clipped = state_values + torch.clamp(state_values - old_state_values, -eps_clip, eps_clip)
-                v_loss1 = F.smooth_l1_loss(state_values, old_lt_rewards)
-                v_loss2 = F.smooth_l1_loss(state_value_clipped, old_lt_rewards)
-                value_loss = torch.max(v_loss1, v_loss2)
-                # Total loss:
-                loss = policy_loss + 0.5 * value_loss + 0.001 * entropy_loss
+                    # Finding the ratio (pi_theta / pi_theta__old):
+                    ratios = torch.exp(log_action_probs - old_log_probs[batch_indexes])
 
-                # take gradient step
-                optimizer.zero_grad()
-                loss.mean().backward()
-                optimizer.step()
+                    # Finding Surrogate Loss:
+                    surr1 = ratios * old_advantages[batch_indexes]
+                    surr2 = torch.clamp(ratios, 1 - eps_clip, 1 + eps_clip) * old_advantages[batch_indexes]
+                    policy_loss = -torch.min(surr1, surr2)
+                    entropy_loss = -dist_entropy
+                    # Finding value loss:
+                    state_value_clipped = state_values + torch.clamp(state_values - old_state_values[batch_indexes],
+                                                                     -eps_clip, eps_clip)
+                    v_loss1 = F.smooth_l1_loss(state_values, old_lt_rewards[batch_indexes])
+                    v_loss2 = F.smooth_l1_loss(state_value_clipped, old_lt_rewards[batch_indexes])
+                    value_loss = torch.max(v_loss1, v_loss2)
+                    # Total loss:
+                    loss = policy_loss + 0.5 * value_loss + 0.001 * entropy_loss
+
+                    # take gradient step
+                    optimizer.zero_grad()
+                    loss.mean().backward()
+                    optimizer.step()
 
             # Copy new weights into old policy:
             rl_agent_old.load_state_dict(rl_agent.state_dict())
