@@ -36,7 +36,7 @@ def main():
     episode_timesteps = 600     # max timesteps in one episode
     hidden_layers = [(64, 0.0), (64, 0.0)]  # list of (hidden_layer_size, dropout_rate)
     batch_timestep = 2000       # update policy every n timesteps
-    lr = 2e-3
+    lr = 1e-3
     gamma = 0.99                # discount factor
     gae_lambda = 0.95           # lambda value for td(lambda) returns
     k_epochs = 4                # update policy for K epochs
@@ -109,7 +109,7 @@ def main():
         # Delete the last (s, a, r, log_prob, v) tuple
         episode_hist.pop()
         # Normalizing the long term rewards
-        lt_rewards = (lt_rewards - lt_rewards.mean()) / (lt_rewards.std() + 1e-7)
+        # lt_rewards = (lt_rewards - lt_rewards.mean()) / (lt_rewards.std() + 1e-8)
         # DO NOT only use the first visit of each (s, a) tuple
         for i, (state, action, _, log_prob, state_value) in enumerate(episode_hist):
             transition_memory.push(state, action, lt_rewards[i], log_prob, state_value)
@@ -125,6 +125,8 @@ def main():
             old_log_probs = torch.as_tensor(old_log_probs, device=device)
             old_state_values = torch.as_tensor(old_state_values, device=device)
             old_advantages = old_lt_rewards - old_state_values
+            # normalize 'old_advantages'
+            old_advantages = (old_advantages - old_advantages.mean()) / (old_advantages.std() + 1e-8)
 
             # Optimize policy for K epochs:
             for _ in range(k_epochs):
@@ -148,7 +150,7 @@ def main():
                 v_loss2 = F.smooth_l1_loss(state_value_clipped, old_lt_rewards)
                 value_loss = torch.max(v_loss1, v_loss2)
                 # Total loss:
-                loss = policy_loss + 0.5 * value_loss + 0.01 * entropy_loss
+                loss = policy_loss + 0.5 * value_loss + 0.001 * entropy_loss
 
                 # take gradient step
                 optimizer.zero_grad()
