@@ -91,4 +91,5 @@ fabric.properties
 torch_models/
 tf_models/
 tabular_models/
+tensorboard/
 asdasd.py

@@ -32,14 +32,14 @@ def main():
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
     render = False
-    max_total_step = 200000     # min number of steps to take during training
-    episode_timesteps = 2000    # max time steps in one episode
+    max_total_step = 100000     # min number of steps to take during training
+    episode_timesteps = 1000    # max time steps in one episode
     hidden_layers = [(64, 0.0), (64, 0.0)]  # list of (hidden_layer_size, dropout_rate)
-    buffer_timestep = 6000      # min time steps in a training buffer
+    buffer_timestep = 2000      # min time steps in a training buffer
     batch_timestep = 1000       # time steps in a single update batch
-    lr = 5e-4
+    lr = 1e-2
     gamma = 0.99                # discount factor
-    gae_lambda = 0.9            # lambda value for td(lambda) returns
+    gae_lambda = 0.95           # lambda value for td(lambda) returns
     k_epochs = 5                # update policy for K epochs
     eps_clip = 0.2              # clip parameter for PPO
     random_seed = None
@@ -65,6 +65,8 @@ def main():
     rl_agent_old.load_state_dict(rl_agent.state_dict())
     rl_agent_old.eval()
     optimizer = torch.optim.Adam(rl_agent.parameters(), lr=lr)
+    lr_scheduler = helper.CosineLogAnnealingLR(
+        optimizer, (max_total_step - 1) // buffer_timestep + 1, eta_min=0.0, log_order=1)
 
     episode_reward_list = []
     transition_memory = helper.ReplayMemory(buffer_timestep + episode_timesteps,
@@ -115,7 +117,6 @@ def main():
             transition_memory.push(state, action, lt_rewards[i], log_prob, state_value)
 
         if buffer_step >= buffer_timestep:
-            buffer_step = 0
             old_states, old_actions, old_lt_rewards, old_log_probs, old_state_values = zip(*transition_memory.memory)
             buffer_size = len(transition_memory)
             transition_memory.clear()
@@ -164,12 +165,13 @@ def main():
                     optimizer.zero_grad()
                     loss.mean().backward()
                     optimizer.step()
-
+            lr_scheduler.step()
             # Copy new weights into old policy:
             rl_agent_old.load_state_dict(rl_agent.state_dict())
 
             if total_step >= max_total_step:
                 break
+            buffer_step = 0
 
     torch.save(rl_agent.state_dict(), "torch_models/" + env_name + ".ppo_model")
     plt.plot(list(range(1, len(episode_reward_list) + 1)), episode_reward_list)
