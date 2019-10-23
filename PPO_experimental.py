@@ -6,13 +6,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch.distributions import Categorical
-import torch.nn.functional as F
 
 from rl_library import rl_agents, helper
-torch.set_default_dtype(torch.float64)
+torch.set_default_dtype(torch.float32)
 
 
 def main():
+    # LOSS FUNCTION CHANGES
+    # TODO: Add intrinsic reward, forward/inverse dynamic loss  (5)
+    # TRAINING CHANGES
+    # TODO: Train each critic (value loss) for 1 batch before   (4)
+    #  training actor (policy loss + entropy loss) for 1 batch
+    # TODO: Train forward/inverse loss with critics before      (5)
+    #  training actor (policy loss + entropy loss) for 1 batch
+    # TODO: Experiment with co-training actor and other losses  (6)
+    #  for better sampling efficiency
     ############## Hyperparameters ##############
     env_name = 'CartPole-v1'
     # creating environment
@@ -25,7 +33,7 @@ def main():
     hidden_layers = [(64, 0.0, False), (64, 0.0, False)]  # list of (hidden_layer_size, dropout_rate, use_batch_layer)
     buffer_timestep = 2000      # min time steps in a training buffer
     batch_timestep = 1000       # time steps in a single update batch
-    lr = 1e-2
+    lr = 5e-3
     gamma = 0.99                # discount factor
     gae_lambda = 0.95           # lambda value for td(lambda) returns
     k_epochs = 5                # update policy for K epochs
@@ -42,12 +50,12 @@ def main():
         env.seed(random_seed)
 
     env._max_episode_steps = episode_timesteps
-    rl_agent = rl_agents.PPOContStateDiscActionAgentTorch(
+    rl_agent = rl_agents.PPOExpContStateDiscActionAgentTorch(
         state_dim, action_dim, hidden_layers).to(device)
-    rl_agent_old = rl_agents.PPOContStateDiscActionAgentTorch(
+    rl_agent_old = rl_agents.PPOExpContStateDiscActionAgentTorch(
         state_dim, action_dim, hidden_layers).to(device)
     try:
-        rl_agent.load_state_dict(torch.load("torch_models/" + env_name + ".ppo_model"))
+        rl_agent.load_state_dict(torch.load("torch_models/" + env_name + ".ppo_exp_model"))
     except FileNotFoundError:
         pass
     rl_agent_old.load_state_dict(rl_agent.state_dict())
@@ -62,27 +70,27 @@ def main():
     buffer_step = total_step = 0
     # Start training loop
     while True:
-        episodic_reward, state, episode_hist = 0.0, torch.as_tensor(env.reset(), device=device), []
+        episodic_reward, state, episode_hist = 0.0, torch.as_tensor(env.reset(), dtype=torch.float, device=device), []
         if render:
             env.render()
         episode_step = 0
         # Start episode loop
         while True:
-            log_prob, state_value = rl_agent_old(state.unsqueeze(0))
+            log_prob, state_value = rl_agent_old(state.unsqueeze(0), True), rl_agent_old(state.unsqueeze(0), False)
             log_prob, state_value = log_prob.detach().squeeze(0), state_value.detach().squeeze(0)
             dist = Categorical(logits=log_prob)
             action = dist.sample()
             next_state, reward, done, _ = env.step(action.item())
-            next_state = torch.as_tensor(next_state, device=device)
+            next_state = torch.as_tensor(next_state, dtype=torch.float, device=device)
             if render:
                 env.render()
             episodic_reward += reward
-            episode_hist.append((state, action, torch.tensor(reward, device=device),
+            episode_hist.append((state, action, torch.tensor(reward, dtype=torch.float, device=device),
                                  dist.log_prob(action).detach(), state_value.squeeze(0).detach()))
             episode_step, buffer_step, total_step = episode_step + 1, buffer_step + 1, total_step + 1
-            if done:
-                if episode_step >= episode_timesteps:
-                    _, state_value = rl_agent_old(next_state.unsqueeze(0))
+            if done or (episode_step > 1 and buffer_step >= buffer_timestep):
+                if episode_step >= episode_timesteps or buffer_step >= buffer_timestep:
+                    state_value = rl_agent_old(next_state.unsqueeze(0), False)
                     state_value = state_value.detach().squeeze(0)
                     episode_hist.append(
                         (None, None, torch.tensor(np.nan, device=device), None, state_value.squeeze(0)))
@@ -99,7 +107,7 @@ def main():
         # Delete the last (s, a, r, log_prob, v) tuple
         episode_hist.pop()
         # Normalizing the long term rewards
-        lt_rewards = (lt_rewards - lt_rewards.mean()) / (lt_rewards.std() + 1e-8)
+        lt_rewards = (lt_rewards - lt_rewards.mean()) / (helper.safe_std(lt_rewards) + 1e-8)
         # DO NOT only use the first visit of each (s, a) tuple
         for i, (state, action, _, log_prob, state_value) in enumerate(episode_hist):
             transition_memory.push(state, action, lt_rewards[i], log_prob, state_value)
@@ -126,28 +134,14 @@ def main():
                     batch_end_index = min(batch_start_index + batch_timestep, buffer_size)
                     batch_indexes = shuffled_indexes[batch_start_index:batch_end_index]
 
-                    # Evaluating old actions and values :
-                    log_probs, state_values = rl_agent(old_states[batch_indexes])
-                    if log_probs is None:
+                    policy_loss, entropy_loss = rl_agent.actor_losses(old_states[batch_indexes],
+                                                                      old_actions[batch_indexes],
+                                                                      old_log_probs[batch_indexes],
+                                                                      old_advantages[batch_indexes], eps_clip)
+                    if policy_loss is None:
                         break
-                    log_action_probs = log_probs.gather(1, old_actions[batch_indexes].view(-1, 1)).squeeze(1)
-                    state_values = state_values.squeeze(1)
-                    dist_entropy = Categorical(log_probs).entropy()
-
-                    # Finding the ratio (pi_theta / pi_theta__old):
-                    ratios = torch.exp(log_action_probs - old_log_probs[batch_indexes])
-
-                    # Finding Surrogate Loss:
-                    surr1 = ratios * old_advantages[batch_indexes]
-                    surr2 = torch.clamp(ratios, 1 - eps_clip, 1 + eps_clip) * old_advantages[batch_indexes]
-                    policy_loss = -torch.min(surr1, surr2)
-                    entropy_loss = -dist_entropy
-                    # Finding value loss:
-                    state_value_clipped = state_values + torch.clamp(state_values - old_state_values[batch_indexes],
-                                                                     -eps_clip, eps_clip)
-                    v_loss1 = F.smooth_l1_loss(state_values, old_lt_rewards[batch_indexes])
-                    v_loss2 = F.smooth_l1_loss(state_value_clipped, old_lt_rewards[batch_indexes])
-                    value_loss = torch.max(v_loss1, v_loss2)
+                    value_loss = rl_agent.critic_losses(old_states[batch_indexes], old_lt_rewards[batch_indexes],
+                                                        old_state_values[batch_indexes], eps_clip)
                     # Total loss:
                     loss = policy_loss + 0.5 * value_loss + 0.001 * entropy_loss
 
@@ -163,7 +157,7 @@ def main():
                 break
             buffer_step = 0
 
-    torch.save(rl_agent.state_dict(), "torch_models/" + env_name + ".ppo_model")
+    torch.save(rl_agent.state_dict(), "torch_models/" + env_name + ".ppo_exp_model")
     plt.plot(list(range(1, len(episode_reward_list) + 1)), episode_reward_list)
     plt.xlabel('Episode')
     plt.ylabel('Total reward')

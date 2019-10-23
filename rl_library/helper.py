@@ -175,3 +175,8 @@ class CosineLogAnnealingLR:
         self.last_epoch = epoch
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             param_group['lr'] = lr
+
+
+def safe_std(tensor):
+    std = tensor.std()
+    return std if not torch.isnan(std) else torch.zeros_like(std)
