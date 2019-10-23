@@ -123,7 +123,7 @@ def main():
             old_log_probs = torch.as_tensor(old_log_probs, device=device)
             old_state_values = torch.as_tensor(old_state_values, device=device)
             old_advantages = old_lt_rewards - old_state_values
-            # normalize 'old_advantages' for this batch
+            # normalize 'old_advantages' for this buffer
             old_advantages = (old_advantages - old_advantages.mean()) / (old_advantages.std() + 1e-8)
 
             # Optimize policy for K epochs:

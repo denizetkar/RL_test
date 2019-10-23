@@ -115,7 +115,7 @@ def main():
             old_log_probs = torch.as_tensor(old_log_probs, device=device)
             old_state_values = torch.as_tensor(old_state_values, device=device)
             old_advantages = old_lt_rewards - old_state_values
-            # normalize 'old_advantages' for this batch
+            # normalize 'old_advantages' for this buffer
             old_advantages = (old_advantages - old_advantages.mean()) / (old_advantages.std() + 1e-8)
 
             # Optimize policy for K epochs:
@@ -143,8 +143,8 @@ def main():
                     policy_loss = -torch.min(surr1, surr2)
                     entropy_loss = -dist_entropy
                     # Finding value loss:
-                    state_value_clipped = state_values + torch.clamp(state_values - old_state_values[batch_indexes],
-                                                                     -eps_clip, eps_clip)
+                    state_value_clipped = old_state_values[batch_indexes] + torch.clamp(
+                        state_values - old_state_values[batch_indexes], -eps_clip, eps_clip)
                     v_loss1 = F.smooth_l1_loss(state_values, old_lt_rewards[batch_indexes])
                     v_loss2 = F.smooth_l1_loss(state_value_clipped, old_lt_rewards[batch_indexes])
                     value_loss = torch.max(v_loss1, v_loss2)

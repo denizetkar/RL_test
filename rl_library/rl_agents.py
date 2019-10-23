@@ -169,8 +169,8 @@ class PPOExpContStateDiscActionAgentTorch(nn.Module):
         state_values = state_values.squeeze(1)
 
         # Finding value loss:
-        state_value_clipped = state_values + torch.clamp(state_values - old_state_values,
-                                                         -eps_clip, eps_clip)
+        state_value_clipped = old_state_values + torch.clamp(state_values - old_state_values,
+                                                             -eps_clip, eps_clip)
         v_loss1 = F.smooth_l1_loss(state_values, old_lt_rewards)
         v_loss2 = F.smooth_l1_loss(state_value_clipped, old_lt_rewards)
         value_loss = torch.max(v_loss1, v_loss2)
