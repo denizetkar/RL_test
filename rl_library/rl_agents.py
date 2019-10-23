@@ -77,11 +77,14 @@ class PPOContStateDiscActionAgentTorch(nn.Module):
         super().__init__()
         hidden_layer_sizes = helper.get_ith_index(hidden_layers, 0)
         dropout_rates = helper.get_ith_index(hidden_layers, 1)
+        use_batch_layers = helper.get_ith_index(hidden_layers, 2)
         first_hidden_layer = nn.Linear(s_dim, hidden_layer_sizes[0])
         self.hidden_layers = nn.ModuleList(
             [first_hidden_layer] + [nn.Linear(hidden_layer_sizes[i], hidden_layer_sizes[i + 1])
                                     for i in range(len(hidden_layers) - 1)])
-        # self.bn_layers = nn.ModuleList([nn.BatchNorm1d(hidden_layer_size) for hidden_layer_size in hidden_layer_sizes])
+        self.bn_layers = nn.ModuleList(
+            [nn.BatchNorm1d(hidden_layer_size) if use_batch_layers[layer_num] else nn.Identity()
+             for layer_num, hidden_layer_size in enumerate(hidden_layer_sizes)])
         self.dropouts = nn.ModuleList([nn.Dropout(dropout) for dropout in dropout_rates])
         # define final layers (action/value)
         self.action_layer = nn.Linear(hidden_layer_sizes[-1], a_size)
@@ -89,9 +92,13 @@ class PPOContStateDiscActionAgentTorch(nn.Module):
 
     def forward(self, states):
         x = states
-        for hidden_layer, dropout in zip(self.hidden_layers, self.dropouts):
-            x = F.leaky_relu(hidden_layer(x))
-            x = dropout(x)
+        try:
+            for hidden_layer, bn_layer, dropout in zip(self.hidden_layers, self.bn_layers, self.dropouts):
+                x = F.leaky_relu(hidden_layer(x))
+                x = dropout(bn_layer(x))
+        except ValueError:
+            # Error is most likely due to giving 1 sample to batchnorm layer
+            return None, None
         action_scores = self.action_layer(x)
         log_a_probs = F.log_softmax(action_scores, dim=-1)
         state_values = self.value_layer(x)

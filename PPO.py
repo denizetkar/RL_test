@@ -34,7 +34,7 @@ def main():
     render = False
     max_total_step = 100000     # min number of steps to take during training
     episode_timesteps = 1000    # max time steps in one episode
-    hidden_layers = [(64, 0.0), (64, 0.0)]  # list of (hidden_layer_size, dropout_rate)
+    hidden_layers = [(64, 0.0, False), (64, 0.0, False)]  # list of (hidden_layer_size, dropout_rate, use_batch_layer)
     buffer_timestep = 2000      # min time steps in a training buffer
     batch_timestep = 1000       # time steps in a single update batch
     lr = 1e-2
@@ -66,7 +66,7 @@ def main():
     rl_agent_old.eval()
     optimizer = torch.optim.Adam(rl_agent.parameters(), lr=lr)
     lr_scheduler = helper.CosineLogAnnealingLR(
-        optimizer, (max_total_step - 1) // buffer_timestep + 1, eta_min=0.0, log_order=1)
+        optimizer, (max_total_step - 1) // buffer_timestep + 1, eta_min=0.0, log_order=0)
 
     episode_reward_list = []
     transition_memory = helper.ReplayMemory(buffer_timestep + episode_timesteps,
@@ -140,6 +140,8 @@ def main():
 
                     # Evaluating old actions and values :
                     log_probs, state_values = rl_agent(old_states[batch_indexes])
+                    if log_probs is None:
+                        break
                     log_action_probs = log_probs.gather(1, old_actions[batch_indexes].view(-1, 1)).squeeze(1)
                     state_values = state_values.squeeze(1)
                     dist_entropy = Categorical(log_probs).entropy()
