@@ -1,10 +1,12 @@
-import math
-import random
-import warnings
-import weakref
 from collections import namedtuple
 from functools import wraps
+import math
+import random
+import time
+import warnings
+import weakref
 
+import hyperopt
 import numpy as np
 import torch
 
@@ -180,3 +182,61 @@ class CosineLogAnnealingLR:
 def safe_std(tensor):
     std = tensor.std()
     return std if not torch.isnan(std) else torch.zeros_like(std)
+
+
+class ModelEvaluator:
+    def __init__(self, evaluation_func, prior_params, integer_param_names=None, indexed_param_values=None,
+                 invert_loss=False):
+        # evaluation_func(params) -> metric, model, other_metrics(?)
+        if integer_param_names is None:
+            integer_param_names = []
+        if indexed_param_values is None:
+            indexed_param_values = {}
+        self.evaluation_func = evaluation_func
+        self.params = prior_params
+        self.integer_param_names = integer_param_names
+        self.indexed_param_values = indexed_param_values
+        self.invert_loss = invert_loss
+        self.best_model = None
+        self.best_params = None
+        self.best_loss = None
+        self.best_other_metrics = None
+        self.iter_count = 0
+
+    def state_dict(self):
+        return dict(
+            integer_param_names=self.integer_param_names,
+            indexed_param_values=self.indexed_param_values,
+            invert_loss=self.invert_loss,
+            best_model=self.best_model,
+            best_params=self.best_params,
+            best_loss=self.best_loss,
+            best_other_metrics=self.best_other_metrics
+        )
+
+    def load_state_dict(self, state_dict):
+        for name, value in state_dict.items():
+            if hasattr(self, name):
+                setattr(self, name, value)
+
+    def __call__(self, params):
+        self.params.update(params)
+        for p in self.integer_param_names:
+            self.params[p] = int(self.params[p])
+        # turn index value 'self.params[p]' into the actual intended value in 'self.indexed_param_values[p]'
+        for p in self.indexed_param_values:
+            self.params[p] = self.indexed_param_values[p][self.params[p]]
+
+        start = time.time()
+        metric, model, other_metrics = self.evaluation_func(**self.params)
+        eval_time = time.time() - start
+        loss = -metric if self.invert_loss else metric
+
+        if (self.best_loss is not None and loss < self.best_loss) or self.best_loss is None:
+            self.best_model = model
+            self.best_params = self.params.copy()
+            self.best_loss = loss
+            self.best_other_metrics = other_metrics
+        self.iter_count += 1
+        return {'status': hyperopt.STATUS_OK, 'loss': loss, 'params': params, 'eval_time': eval_time,
+                'iter_count': self.iter_count}

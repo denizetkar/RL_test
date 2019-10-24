@@ -9,7 +9,7 @@ from torch.distributions import Categorical
 import torch.nn.functional as F
 
 from rl_library import rl_agents, helper
-torch.set_default_dtype(torch.float64)
+torch.set_default_dtype(torch.float32)
 
 
 def main():
@@ -62,7 +62,7 @@ def main():
     buffer_step = total_step = 0
     # Start training loop
     while True:
-        episodic_reward, state, episode_hist = 0.0, torch.as_tensor(env.reset(), device=device), []
+        episodic_reward, state, episode_hist = 0.0, torch.as_tensor(env.reset(), dtype=torch.float, device=device), []
         if render:
             env.render()
         episode_step = 0
@@ -73,11 +73,11 @@ def main():
             dist = Categorical(logits=log_prob)
             action = dist.sample()
             next_state, reward, done, _ = env.step(action.item())
-            next_state = torch.as_tensor(next_state, device=device)
+            next_state = torch.as_tensor(next_state, dtype=torch.float, device=device)
             if render:
                 env.render()
             episodic_reward += reward
-            episode_hist.append((state, action, torch.tensor(reward, device=device),
+            episode_hist.append((state, action, torch.tensor(reward, dtype=torch.float, device=device),
                                  dist.log_prob(action).detach(), state_value.squeeze(0).detach()))
             episode_step, buffer_step, total_step = episode_step + 1, buffer_step + 1, total_step + 1
             if done:
@@ -98,8 +98,6 @@ def main():
             torch.stack(helper.get_ith_index(episode_hist, 4)), gamma, gae_lambda)
         # Delete the last (s, a, r, log_prob, v) tuple
         episode_hist.pop()
-        # Normalizing the long term rewards
-        lt_rewards = (lt_rewards - lt_rewards.mean()) / (lt_rewards.std() + 1e-8)
         # DO NOT only use the first visit of each (s, a) tuple
         for i, (state, action, _, log_prob, state_value) in enumerate(episode_hist):
             transition_memory.push(state, action, lt_rewards[i], log_prob, state_value)
@@ -114,6 +112,8 @@ def main():
             old_lt_rewards = torch.as_tensor(old_lt_rewards, device=device)
             old_log_probs = torch.as_tensor(old_log_probs, device=device)
             old_state_values = torch.as_tensor(old_state_values, device=device)
+            # Normalizing the long term rewards
+            old_lt_rewards = (old_lt_rewards - old_lt_rewards.mean()) / (old_lt_rewards.std() + 1e-8)
             old_advantages = old_lt_rewards - old_state_values
             # normalize 'old_advantages' for this buffer
             old_advantages = (old_advantages - old_advantages.mean()) / (old_advantages.std() + 1e-8)
@@ -145,8 +145,8 @@ def main():
                     # Finding value loss:
                     state_value_clipped = old_state_values[batch_indexes] + torch.clamp(
                         state_values - old_state_values[batch_indexes], -eps_clip, eps_clip)
-                    v_loss1 = F.smooth_l1_loss(state_values, old_lt_rewards[batch_indexes])
-                    v_loss2 = F.smooth_l1_loss(state_value_clipped, old_lt_rewards[batch_indexes])
+                    v_loss1 = F.smooth_l1_loss(state_values, old_lt_rewards[batch_indexes], reduction='none')
+                    v_loss2 = F.smooth_l1_loss(state_value_clipped, old_lt_rewards[batch_indexes], reduction='none')
                     value_loss = torch.max(v_loss1, v_loss2)
                     # Total loss:
                     loss = policy_loss + 0.5 * value_loss + 0.001 * entropy_loss
