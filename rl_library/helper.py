@@ -192,6 +192,8 @@ class ModelEvaluator:
             integer_param_names = []
         if indexed_param_values is None:
             indexed_param_values = {}
+        integer_param_names = set(integer_param_names)
+        integer_param_names.update(indexed_param_values.keys())
         self.evaluation_func = evaluation_func
         self.params = prior_params
         self.integer_param_names = integer_param_names

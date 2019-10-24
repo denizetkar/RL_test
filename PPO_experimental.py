@@ -180,7 +180,7 @@ def main():
         state_dim=state_dim,
         action_dim=action_dim,
         render=False,
-        max_total_step=100,      # min number of steps to take during training
+        max_total_step=100000,      # min number of steps to take during training
         episode_timesteps=1000,     # max time steps in one episode
         hidden_layers=hidden_layers,  # list of (hidden_layer_size, dropout_rate, use_batch_layer)
         gamma=0.99,                 # discount factor
