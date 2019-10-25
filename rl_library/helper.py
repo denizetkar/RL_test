@@ -198,6 +198,9 @@ class ModelEvaluator:
         self.params = prior_params
         self.integer_param_names = integer_param_names
         self.indexed_param_values = indexed_param_values
+        self.param_value_to_index = {p: {val: idx for idx, val in enumerate(p_values)}
+                                     for p, p_values in self.indexed_param_values.items()}
+        self.params_are_indexed = True
         self.invert_loss = invert_loss
         self.best_model = None
         self.best_params = None
@@ -206,12 +209,19 @@ class ModelEvaluator:
         self.iter_count = 0
 
     def state_dict(self):
+        if self.params_are_indexed:
+            best_params = self.best_params
+        else:
+            # turn actual values into indexes for indexed variables
+            best_params = self.best_params.copy()
+            for p in self.indexed_param_values:
+                best_params[p] = self.param_value_to_index[p][best_params[p]]
         return dict(
             integer_param_names=self.integer_param_names,
             indexed_param_values=self.indexed_param_values,
             invert_loss=self.invert_loss,
             best_model=self.best_model,
-            best_params=self.best_params,
+            best_params=best_params,
             best_loss=self.best_loss,
             best_other_metrics=self.best_other_metrics
         )
@@ -220,6 +230,8 @@ class ModelEvaluator:
         for name, value in state_dict.items():
             if hasattr(self, name):
                 setattr(self, name, value)
+        # assume that indexed parameters are saved as index
+        self.params_are_indexed = True
 
     def __call__(self, params):
         self.params.update(params)
@@ -228,6 +240,7 @@ class ModelEvaluator:
         # turn index value 'self.params[p]' into the actual intended value in 'self.indexed_param_values[p]'
         for p in self.indexed_param_values:
             self.params[p] = self.indexed_param_values[p][self.params[p]]
+        self.params_are_indexed = False
 
         start = time.time()
         metric, model, other_metrics = self.evaluation_func(**self.params)

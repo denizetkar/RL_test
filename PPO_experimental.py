@@ -169,10 +169,6 @@ def main():
     #############################################
 
     model_path = os.path.join('torch_models', 'best_checkpoint.ppo_exp')
-    # with open(model_path, 'rb') as f:
-    #     checkpoint = pickle.load(f)
-    # model_evaluator = helper.ModelEvaluator(ppo_exp_evaluation, prior_params)
-    # model_evaluator.load_state_dict(checkpoint['model_evaluator_state_dict'])
 
     random_seed = 11
     prior_params = dict(
@@ -196,6 +192,10 @@ def main():
     indexed_param_values = dict(buffer_to_batch_ratio=[2, 4, 5, 10])
     model_evaluator = helper.ModelEvaluator(ppo_exp_evaluation, prior_params, integer_param_names,
                                             indexed_param_values, invert_loss=True)
+    if os.path.exists(model_path):
+        with open(model_path, 'rb') as f:
+            checkpoint = pickle.load(f)
+            model_evaluator.load_state_dict(checkpoint)
     # For quantized uniform parameters: low <- (actual_low - q/2) AND high <- (actual_high + q/2)
     btbr_len = len(indexed_param_values['buffer_to_batch_ratio'])
     space = {
@@ -205,14 +205,20 @@ def main():
         'k_epochs': hp.quniform('k_epochs', 0.5, 10.5, 1),                                       # (1, 10)
         'lr_decay_order': hp.quniform('lr_decay_order', -2.5, 10.5, 1)                           # (-2, 10)
     }
-    trials = generate_trials_to_calculate([
-        {
-            'buffer_timestep': 2000,     # min time steps in a training buffer
-            'buffer_to_batch_ratio': 0,  # ratio of time steps in a single update batch (index)
-            'lr': 5e-3,
-            'k_epochs': 4,               # update policy for K epochs
-            'lr_decay_order': 0
-        }])
+    if model_evaluator.best_params is None:
+        points_to_evaluate = [
+            {
+                # default parameters to evaluate
+                'buffer_timestep': 2000,     # min time steps in a training buffer
+                'buffer_to_batch_ratio': 0,  # ratio of time steps in a single update batch (index)
+                'lr': 5e-3,
+                'k_epochs': 4,               # update policy for K epochs
+                'lr_decay_order': 0
+            }]
+    else:
+        points_to_evaluate = [{name: value for name, value in model_evaluator.best_params.items()
+                               if name not in prior_params}]
+    trials = generate_trials_to_calculate(points_to_evaluate)
     best_params = hyperopt.fmin(model_evaluator, space, algo=hyperopt.atpe.suggest, max_evals=100, trials=trials,
                                 rstate=np.random.RandomState(random_seed))
     print('Best parameters: %s' % best_params)
