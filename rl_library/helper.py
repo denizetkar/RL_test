@@ -1,12 +1,13 @@
-from collections import namedtuple
-from functools import wraps
 import math
 import random
 import time
 import warnings
 import weakref
+from collections import namedtuple
+from functools import wraps
 
 import hyperopt
+from hyperopt import pyll
 import numpy as np
 import torch
 
@@ -195,27 +196,21 @@ class ModelEvaluator:
         integer_param_names = set(integer_param_names)
         integer_param_names.update(indexed_param_values.keys())
         self.evaluation_func = evaluation_func
-        self.params = prior_params
+        self.prior_params = prior_params
         self.integer_param_names = integer_param_names
         self.indexed_param_values = indexed_param_values
-        self.param_value_to_index = {p: {val: idx for idx, val in enumerate(p_values)}
-                                     for p, p_values in self.indexed_param_values.items()}
-        self.params_are_indexed = True
         self.invert_loss = invert_loss
         self.best_model = None
+        # Keep indexed parameters in best_params as indexed all the time
         self.best_params = None
         self.best_loss = None
         self.best_other_metrics = None
         self.iter_count = 0
 
     def state_dict(self):
-        if self.params_are_indexed:
-            best_params = self.best_params
-        else:
-            # turn actual values into indexes for indexed variables
-            best_params = self.best_params.copy()
-            for p in self.indexed_param_values:
-                best_params[p] = self.param_value_to_index[p][best_params[p]]
+        # Save best parameters with the prior parameters
+        best_params = self.best_params.copy()
+        best_params.update(self.prior_params)
         return dict(
             integer_param_names=self.integer_param_names,
             indexed_param_values=self.indexed_param_values,
@@ -230,30 +225,52 @@ class ModelEvaluator:
         for name, value in state_dict.items():
             if hasattr(self, name):
                 setattr(self, name, value)
-        self.param_value_to_index = {p: {val: idx for idx, val in enumerate(p_values)}
-                                     for p, p_values in self.indexed_param_values.items()}
-        # assume that indexed parameters are saved as index
-        self.params_are_indexed = True
 
     def __call__(self, params):
-        self.params.update(params)
-        for p in self.integer_param_names:
-            self.params[p] = int(self.params[p])
-        # turn index value 'self.params[p]' into the actual intended value in 'self.indexed_param_values[p]'
-        for p in self.indexed_param_values:
-            self.params[p] = self.indexed_param_values[p][self.params[p]]
-        self.params_are_indexed = False
+        # 'loss' is either None or real number
+        loss = params['loss']
+        del params['loss']
 
-        start = time.time()
-        metric, model, other_metrics = self.evaluation_func(**self.params)
-        eval_time = time.time() - start
-        loss = -metric if self.invert_loss else metric
+        all_params = params.copy()
+        all_params.update(self.prior_params)
+        for p in self.integer_param_names:
+            all_params[p] = int(all_params[p])
+        # turn index value 'all_params[p]' into the actual intended value in 'self.indexed_param_values[p]'
+        for p in self.indexed_param_values:
+            all_params[p] = self.indexed_param_values[p][all_params[p]]
+
+        # Check if this trial is pre-calculated
+        if loss is not None:
+            model = other_metrics = None
+            eval_time = 0.0
+        else:
+            start = time.time()
+            metric, model, other_metrics = self.evaluation_func(**all_params)
+            eval_time = time.time() - start
+            loss = -metric if self.invert_loss else metric
 
         if (self.best_loss is not None and loss < self.best_loss) or self.best_loss is None:
             self.best_model = model
-            self.best_params = self.params.copy()
+            self.best_params = params
             self.best_loss = loss
             self.best_other_metrics = other_metrics
         self.iter_count += 1
         return {'status': hyperopt.STATUS_OK, 'loss': loss, 'params': params, 'eval_time': eval_time,
                 'iter_count': self.iter_count}
+
+
+class LowLevelModelEvaluator:
+    def __init__(self, model_evaluator):
+        self.model_evaluator = model_evaluator
+
+    def __call__(self, expr, memo, ctrl):
+        pyll_rval = pyll.rec_eval(
+            expr,
+            memo=memo,
+            print_node_on_error=False)
+        if 'loss' in ctrl.current_trial['misc']['vals']:
+            loss = ctrl.current_trial['misc']['vals']['loss'][0]
+        else:
+            loss = None
+        pyll_rval.update({'loss': loss})
+        return self.model_evaluator(pyll_rval)

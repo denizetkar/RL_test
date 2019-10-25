@@ -207,7 +207,17 @@ def main():
         'k_epochs': hp.quniform('k_epochs', 0.5, 10.5, 1),                                       # (1, 10)
         'lr_decay_order': hp.quniform('lr_decay_order', -2.5, 10.5, 1)                           # (-2, 10)
     }
-    if model_evaluator.best_params is None:
+    # Create high quality points to evaluate to speed up the optimization
+    if os.path.exists(trials_path):
+        with open(trials_path, 'rb') as f:
+            trial_results = pickle.load(f)
+        trial_results.sort(key=lambda res: res['loss'])
+        # Take 1/2 of the best previous trials
+        trial_results = trial_results[:(len(trial_results) - 1) // 2 + 1]
+        for res in trial_results:
+            res['params']['loss'] = res['loss']
+        points_to_evaluate = [res['params'] for res in trial_results]
+    else:
         points_to_evaluate = [
             {
                 # default parameters to evaluate
@@ -218,7 +228,7 @@ def main():
                 'lr_decay_order': 0
             },
             {
-                # best loss: -522.31
+                'loss': -522.31,
                 'buffer_timestep': 2000,
                 'buffer_to_batch_ratio': 2,
                 'k_epochs': 3,
@@ -226,18 +236,16 @@ def main():
                 'lr_decay_order': 1
             },
             {
-                # best loss: -680.0
+                'loss': -680.0,
                 'buffer_timestep': 1000,
                 'buffer_to_batch_ratio': 2,
                 'k_epochs': 7,
                 'lr': 0.010826087507883215,
                 'lr_decay_order': 7
             }]
-    else:
-        points_to_evaluate = [{name: value for name, value in model_evaluator.best_params.items()
-                               if name not in prior_params}]
     trials = generate_trials_to_calculate(points_to_evaluate)
-    best_params = hyperopt.fmin(model_evaluator, space, algo=hyperopt.atpe.suggest, max_evals=100, trials=trials)
+    best_params = hyperopt.fmin(helper.LowLevelModelEvaluator(model_evaluator), space, algo=hyperopt.atpe.suggest,
+                                max_evals=50, trials=trials, pass_expr_memo_ctrl=True)
     print('Best parameters: %s' % best_params)
 
     # Save trials for diagnosis
