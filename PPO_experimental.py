@@ -149,7 +149,8 @@ def ppo_exp_evaluation(
             else:
                 lr_scheduler.step()
 
-    return np.mean(episode_reward_list[-(max_total_step//episode_timesteps):]), rl_agent.to('cpu'), episode_reward_list
+    return np.mean(episode_reward_list[-((max_total_step - 1) // episode_timesteps + 1):]), rl_agent.to(
+        'cpu'), episode_reward_list
 
 
 def main():
@@ -169,6 +170,7 @@ def main():
     #############################################
 
     model_path = os.path.join('torch_models', 'best_checkpoint.ppo_exp')
+    trials_path = os.path.join('torch_models', 'last_trials.ppo_exp')
 
     random_seed = 11
     prior_params = dict(
@@ -214,15 +216,33 @@ def main():
                 'lr': 5e-3,
                 'k_epochs': 4,               # update policy for K epochs
                 'lr_decay_order': 0
+            },
+            {
+                # best loss: -522.31
+                'buffer_timestep': 2000,
+                'buffer_to_batch_ratio': 2,
+                'k_epochs': 3,
+                'lr': 0.002313285464437867,
+                'lr_decay_order': 1
+            },
+            {
+                # best loss: -680.0
+                'buffer_timestep': 1000,
+                'buffer_to_batch_ratio': 2,
+                'k_epochs': 7,
+                'lr': 0.010826087507883215,
+                'lr_decay_order': 7
             }]
     else:
         points_to_evaluate = [{name: value for name, value in model_evaluator.best_params.items()
                                if name not in prior_params}]
     trials = generate_trials_to_calculate(points_to_evaluate)
-    best_params = hyperopt.fmin(model_evaluator, space, algo=hyperopt.atpe.suggest, max_evals=100, trials=trials,
-                                rstate=np.random.RandomState(random_seed))
+    best_params = hyperopt.fmin(model_evaluator, space, algo=hyperopt.atpe.suggest, max_evals=100, trials=trials)
     print('Best parameters: %s' % best_params)
 
+    # Save trials for diagnosis
+    with open(trials_path, 'wb') as f:
+        pickle.dump(trials.results, f)
     # Save state of the model evaluator
     with open(model_path, 'wb') as f:
         pickle.dump(model_evaluator.state_dict(), f)

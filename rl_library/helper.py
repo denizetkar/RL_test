@@ -230,6 +230,8 @@ class ModelEvaluator:
         for name, value in state_dict.items():
             if hasattr(self, name):
                 setattr(self, name, value)
+        self.param_value_to_index = {p: {val: idx for idx, val in enumerate(p_values)}
+                                     for p, p_values in self.indexed_param_values.items()}
         # assume that indexed parameters are saved as index
         self.params_are_indexed = True
 
