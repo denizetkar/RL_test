@@ -19,9 +19,9 @@ torch.set_default_dtype(torch.float32)
 
 
 def ppo_exp_evaluation(
-        env, state_dim, action_dim, render, max_total_step, episode_timesteps, hidden_layers, buffer_timestep,
+        env, state_dim, action_dim, max_total_step, episode_timesteps, hidden_layers, buffer_timestep,
         buffer_to_batch_ratio, lr, gamma, gae_lambda, k_epochs, eps_clip, training_alternation, lr_decay_order,
-        random_seed=None, device=torch.device('cpu'), initial_model=None):
+        render=False, random_seed=None, device=torch.device('cpu'), initial_model=None):
     batch_timestep = max(buffer_timestep // buffer_to_batch_ratio, 1)
     if random_seed is not None:
         random.seed(random_seed)
@@ -177,7 +177,6 @@ def main():
         env=env,
         state_dim=state_dim,
         action_dim=action_dim,
-        render=False,
         max_total_step=100000,      # min number of steps to take during training
         episode_timesteps=1000,     # max time steps in one episode
         hidden_layers=hidden_layers,  # list of (hidden_layer_size, dropout_rate, use_batch_layer)
