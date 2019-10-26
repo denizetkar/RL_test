@@ -11,6 +11,7 @@ import numpy as np
 import torch
 from hyperopt import hp
 from hyperopt.fmin import generate_trials_to_calculate
+from hyperopt.pyll.stochastic import sample
 from torch.distributions import Categorical
 
 from rl_library import rl_agents, helper
@@ -172,7 +173,6 @@ def main():
     model_path = os.path.join('torch_models', 'best_checkpoint.ppo_exp')
     trials_path = os.path.join('torch_models', 'last_trials.ppo_exp')
 
-    random_seed = 11
     prior_params = dict(
         env=env,
         state_dim=state_dim,
@@ -185,13 +185,12 @@ def main():
         gae_lambda=0.95,            # lambda value for td(lambda) returns
         eps_clip=0.2,               # clip parameter for PPO
         training_alternation=True,  # whether to train actor and critic together or alternatively (policy iteration)
-        random_seed=random_seed,
         # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         device=torch.device('cpu')
     )
 
     integer_param_names = ['buffer_timestep', 'buffer_to_batch_ratio', 'k_epochs']
-    indexed_param_values = dict(buffer_to_batch_ratio=[2, 4, 5, 10])
+    indexed_param_values = dict(buffer_to_batch_ratio=[2, 4, 5, 8, 10])
     model_evaluator = helper.ModelEvaluator(ppo_exp_evaluation, prior_params, integer_param_names,
                                             indexed_param_values, invert_loss=True)
     if os.path.exists(model_path):
@@ -201,20 +200,21 @@ def main():
     # For quantized uniform parameters: low <- (actual_low - q/2) AND high <- (actual_high + q/2)
     btbr_len = len(indexed_param_values['buffer_to_batch_ratio'])
     space = {
-        'buffer_timestep': hp.quniform('buffer_timestep', 500, 10500, 1000),                      # (1000, 10000)
+        'buffer_timestep': hp.quniform('buffer_timestep', 500, 10500, 1000),                     # (1000, 10000)
         'buffer_to_batch_ratio': hp.quniform('buffer_to_batch_ratio', -0.5, btbr_len - 0.5, 1),  # (0, btbr_len - 1)
         'lr': hp.loguniform('lr', math.log(1e-4), math.log(1e-1)),                               # (1e-4, 1e-1)
         'k_epochs': hp.quniform('k_epochs', 0.5, 10.5, 1),                                       # (1, 10)
-        'lr_decay_order': hp.quniform('lr_decay_order', -2.5, 10.5, 1)                           # (-2, 10)
+        'lr_decay_order': hp.quniform('lr_decay_order', -2.5, 10.5, 1),                          # (-2, 10)
+        'random_seed': hp.randint('random_seed', 2**15 - 1)
     }
     # Create high quality points to evaluate to speed up the optimization
     if os.path.exists(trials_path):
         with open(trials_path, 'rb') as f:
             trial_results = pickle.load(f)
         # Take 1/2 of the best previous trials and present it in the same order as before
-        trial_results.sort(key=lambda res: res['loss'])
-        trial_results = trial_results[:(len(trial_results) - 1) // 2 + 1]
-        trial_results.sort(key=lambda res: res['iter_count'])
+        # trial_results.sort(key=lambda res: res['loss'])
+        # trial_results = trial_results[:(len(trial_results) - 1) // 2 + 1]
+        # trial_results.sort(key=lambda res: res['iter_count'])
         for res in trial_results:
             res['params']['loss'] = res['loss']
         points_to_evaluate = [res['params'] for res in trial_results]
@@ -223,10 +223,11 @@ def main():
             {
                 # default parameters to evaluate
                 'buffer_timestep': 1000,     # min time steps in a training buffer
-                'buffer_to_batch_ratio': 0,  # ratio of time steps in a single update batch (index)
-                'lr': 5e-3,
-                'k_epochs': 7,               # update policy for K epochs
-                'lr_decay_order': 0
+                'buffer_to_batch_ratio': 2,  # ratio of time steps in a single update batch (index)
+                'lr': 1e-2,
+                'k_epochs': 5,               # update policy for K epochs
+                'lr_decay_order': 5,
+                'random_seed': sample(space)['random_seed'].item()
             },
             {
                 # very potent episode rewards!
@@ -235,15 +236,8 @@ def main():
                 'buffer_to_batch_ratio': 2,
                 'k_epochs': 7,
                 'lr': 0.010826087507883215,
-                'lr_decay_order': 7
-            },
-            {
-                'loss': -680.0,
-                'buffer_timestep': 1000,
-                'buffer_to_batch_ratio': 3,
-                'k_epochs': 10,
-                'lr': 0.0014253017135938846,
-                'lr_decay_order': 1
+                'lr_decay_order': 7,
+                'random_seed': 11
             },
             {
                 'loss': -725.56,
@@ -251,11 +245,30 @@ def main():
                 'buffer_to_batch_ratio': 2,
                 'k_epochs': 5,
                 'lr': 0.005832404615028217,
-                'lr_decay_order': 1
+                'lr_decay_order': 1,
+                'random_seed': 11
+            },
+            {
+                'loss': -780.0,
+                'buffer_timestep': 1000,
+                'buffer_to_batch_ratio': 3,
+                'k_epochs': 7,
+                'lr': 0.006207189028616916,
+                'lr_decay_order': 2,
+                'random_seed': 11
+            },
+            {
+                'loss': -832.24,
+                'buffer_timestep': 1000.0,
+                'buffer_to_batch_ratio': 2.0,
+                'k_epochs': 5.0,
+                'lr': 0.00917173058708793,
+                'lr_decay_order': 5.0,
+                'random_seed': 5076
             }]
     trials = generate_trials_to_calculate(points_to_evaluate)
     best_params = hyperopt.fmin(helper.LowLevelModelEvaluator(model_evaluator), space, algo=hyperopt.atpe.suggest,
-                                max_evals=50, trials=trials, pass_expr_memo_ctrl=True)
+                                max_evals=100, trials=trials, pass_expr_memo_ctrl=True)
     print('Best parameters: %s' % best_params)
     # Check if model_evaluator.best_model exists
     if model_evaluator.best_model is None and model_evaluator.best_params is not None:
