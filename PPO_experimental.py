@@ -201,7 +201,7 @@ def main():
     # For quantized uniform parameters: low <- (actual_low - q/2) AND high <- (actual_high + q/2)
     btbr_len = len(indexed_param_values['buffer_to_batch_ratio'])
     space = {
-        'buffer_timestep': hp.quniform('buffer_timestep', 750, 10250, 500),                      # (1000, 10000)
+        'buffer_timestep': hp.quniform('buffer_timestep', 500, 10500, 1000),                      # (1000, 10000)
         'buffer_to_batch_ratio': hp.quniform('buffer_to_batch_ratio', -0.5, btbr_len - 0.5, 1),  # (0, btbr_len - 1)
         'lr': hp.loguniform('lr', math.log(1e-4), math.log(1e-1)),                               # (1e-4, 1e-1)
         'k_epochs': hp.quniform('k_epochs', 0.5, 10.5, 1),                                       # (1, 10)
@@ -211,9 +211,10 @@ def main():
     if os.path.exists(trials_path):
         with open(trials_path, 'rb') as f:
             trial_results = pickle.load(f)
+        # Take 1/2 of the best previous trials and present it in the same order as before
         trial_results.sort(key=lambda res: res['loss'])
-        # Take 1/2 of the best previous trials
         trial_results = trial_results[:(len(trial_results) - 1) // 2 + 1]
+        trial_results.sort(key=lambda res: res['iter_count'])
         for res in trial_results:
             res['params']['loss'] = res['loss']
         points_to_evaluate = [res['params'] for res in trial_results]
@@ -221,32 +222,47 @@ def main():
         points_to_evaluate = [
             {
                 # default parameters to evaluate
-                'buffer_timestep': 2000,     # min time steps in a training buffer
+                'buffer_timestep': 1000,     # min time steps in a training buffer
                 'buffer_to_batch_ratio': 0,  # ratio of time steps in a single update batch (index)
                 'lr': 5e-3,
-                'k_epochs': 4,               # update policy for K epochs
+                'k_epochs': 7,               # update policy for K epochs
                 'lr_decay_order': 0
             },
             {
-                'loss': -522.31,
-                'buffer_timestep': 2000,
-                'buffer_to_batch_ratio': 2,
-                'k_epochs': 3,
-                'lr': 0.002313285464437867,
-                'lr_decay_order': 1
-            },
-            {
+                # very potent episode rewards!
                 'loss': -680.0,
                 'buffer_timestep': 1000,
                 'buffer_to_batch_ratio': 2,
                 'k_epochs': 7,
                 'lr': 0.010826087507883215,
                 'lr_decay_order': 7
+            },
+            {
+                'loss': -680.0,
+                'buffer_timestep': 1000,
+                'buffer_to_batch_ratio': 3,
+                'k_epochs': 10,
+                'lr': 0.0014253017135938846,
+                'lr_decay_order': 1
+            },
+            {
+                'loss': -725.56,
+                'buffer_timestep': 2000,
+                'buffer_to_batch_ratio': 2,
+                'k_epochs': 5,
+                'lr': 0.005832404615028217,
+                'lr_decay_order': 1
             }]
     trials = generate_trials_to_calculate(points_to_evaluate)
     best_params = hyperopt.fmin(helper.LowLevelModelEvaluator(model_evaluator), space, algo=hyperopt.atpe.suggest,
                                 max_evals=50, trials=trials, pass_expr_memo_ctrl=True)
     print('Best parameters: %s' % best_params)
+    # Check if model_evaluator.best_model exists
+    if model_evaluator.best_model is None and model_evaluator.best_params is not None:
+        params = {'loss': None}
+        params.update(model_evaluator.prior_params)
+        params.update(model_evaluator.best_params)
+        _, model_evaluator.best_model, model_evaluator.best_other_metrics = model_evaluator.evaluation_func(**params)
 
     # Save trials for diagnosis
     with open(trials_path, 'wb') as f:

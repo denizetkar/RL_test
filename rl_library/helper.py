@@ -258,6 +258,13 @@ class ModelEvaluator:
         return {'status': hyperopt.STATUS_OK, 'loss': loss, 'params': params, 'eval_time': eval_time,
                 'iter_count': self.iter_count}
 
+    def reset(self):
+        self.best_model = None
+        self.best_params = None
+        self.best_loss = None
+        self.best_other_metrics = None
+        self.iter_count = 0
+
 
 class LowLevelModelEvaluator:
     def __init__(self, model_evaluator):
