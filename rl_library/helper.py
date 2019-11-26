@@ -236,8 +236,8 @@ class ModelEvaluator:
         for p in self.integer_param_names:
             all_params[p] = int(all_params[p])
         # turn index value 'all_params[p]' into the actual intended value in 'self.indexed_param_values[p]'
-        for p in self.indexed_param_values:
-            all_params[p] = self.indexed_param_values[p][all_params[p]]
+        for p, vals in self.indexed_param_values.items():
+            all_params[p] = vals[all_params[p]]
 
         # Check if this trial is pre-calculated
         if loss is not None:
