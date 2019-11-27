@@ -180,11 +180,6 @@ class CosineLogAnnealingLR:
             param_group['lr'] = lr
 
 
-def safe_std(tensor):
-    std = tensor.std()
-    return std if not torch.isnan(std) else torch.zeros_like(std)
-
-
 class ModelEvaluator:
     def __init__(self, evaluation_func, prior_params, integer_param_names=None, indexed_param_values=None,
                  invert_loss=False):
